@@ -14,6 +14,7 @@ namespace BrainF
 		public string Output { set { labelOutput.Text = value; } }
 
 		private const string Commands = "<>+-.,[]";
+		private int _incDec;
 
 		public MainForm()
 		{
@@ -106,6 +107,7 @@ namespace BrainF
 		private void buttonBuild_Click(object sender, EventArgs e)
 		{
 			var writeMethod = typeof(Console).GetMethod("Write", new[] { typeof(char) });
+			var writeLineMethod = typeof(Console).GetMethod("WriteLine", Type.EmptyTypes);
 			var strLenMethod = typeof(string).GetProperty("Length").GetGetMethod();
 			var strCharsMethod = typeof(string).GetProperty("Chars").GetGetMethod();
 			var substringMethod = typeof(string).GetMethod("Substring", new[] { typeof(int) });
@@ -149,32 +151,58 @@ namespace BrainF
 			il.Emit(OpCodes.Stloc_2);
 			il.MarkLabel(noArgsLbl);
 
+			_incDec = 0;
 			foreach (var c in Code)
 			{
 				switch (c)
 				{
+					case '+':
+						_incDec++;
+						break;
+					case '-':
+						_incDec--;
+						break;
 					case '>':
 					case '<':
+						EmitIncDec(il);
 						EmitLeftRight(il, c == '>');
 						break;
-					case '+':
-					case '-':
-						EmitPlusMinus(il, c == '+');
-						break;
 					case '.':
+						EmitIncDec(il);
 						EmitOutput(il, writeMethod);
 						break;
 					case ',':
+						EmitIncDec(il);
 						EmitInput(il, strLenMethod, strCharsMethod, substringMethod);
 						break;
 					case '[':
+						EmitIncDec(il);
+						il.Emit(OpCodes.Ldloc_0);
+						il.Emit(OpCodes.Ldloc_1);
+						il.Emit(OpCodes.Ldelem_U1);
+						il.Emit(OpCodes.Ldc_I4_0);
+						il.Emit(OpCodes.Ceq);
+						var openLbl = il.DefineLabel();
+						var closeLbl = il.DefineLabel();
+						OpenLabels.Push(openLbl);
+						CloseLabels.Push(closeLbl);
+						il.Emit(OpCodes.Brtrue, closeLbl);
+						il.MarkLabel(openLbl);
 						break;
 					case ']':
+						EmitIncDec(il);
+						il.Emit(OpCodes.Ldloc_0);
+						il.Emit(OpCodes.Ldloc_1);
+						il.Emit(OpCodes.Ldelem_U1);
+						il.Emit(OpCodes.Ldc_I4_0);
+						il.Emit(OpCodes.Ceq);
+						il.Emit(OpCodes.Brfalse, OpenLabels.Pop());
+						il.MarkLabel(CloseLabels.Pop());
 						break;
 				}
 			}
 
-			il.EmitWriteLine("");
+			il.EmitCall(OpCodes.Call, writeLineMethod, null);
 			il.Emit(OpCodes.Ret);
 			assemblyBuilder.SetEntryPoint(main);
 			typeBuilder.CreateType();
@@ -182,7 +210,7 @@ namespace BrainF
 			MessageBox.Show("Done");
 		}
 
-		private static void EmitLeftRight(ILGenerator il, bool right)
+		private void EmitLeftRight(ILGenerator il, bool right)
 		{
 			il.Emit(OpCodes.Ldloc_1);
 			il.Emit(OpCodes.Ldc_I4_1);
@@ -190,20 +218,24 @@ namespace BrainF
 			il.Emit(OpCodes.Stloc_1);
 		}
 
-		private static void EmitPlusMinus(ILGenerator il, bool plus)
+		private void EmitIncDec(ILGenerator il)
 		{
-			il.Emit(OpCodes.Ldloc_0);
-			il.Emit(OpCodes.Ldloc_1);
-			il.Emit(OpCodes.Ldloc_0);
-			il.Emit(OpCodes.Ldloc_1);
-			il.Emit(OpCodes.Ldelem_U1);
-			il.Emit(OpCodes.Ldc_I4_1);
-			il.Emit(plus ? OpCodes.Add : OpCodes.Sub);
-			il.Emit(OpCodes.Conv_U1);
-			il.Emit(OpCodes.Stelem_I1);
+			if (_incDec != 0)
+			{
+				il.Emit(OpCodes.Ldloc_0);
+				il.Emit(OpCodes.Ldloc_1);
+				il.Emit(OpCodes.Ldloc_0);
+				il.Emit(OpCodes.Ldloc_1);
+				il.Emit(OpCodes.Ldelem_U1);
+				il.Emit(OpCodes.Ldc_I4, _incDec);
+				il.Emit(OpCodes.Add);
+				il.Emit(OpCodes.Conv_U1);
+				il.Emit(OpCodes.Stelem_I1);
+			}
+			_incDec = 0;
 		}
 
-		private static void EmitOutput(ILGenerator il, MethodInfo write)
+		private void EmitOutput(ILGenerator il, MethodInfo write)
 		{
 			il.Emit(OpCodes.Ldloc_0);
 			il.Emit(OpCodes.Ldloc_1);
@@ -211,7 +243,7 @@ namespace BrainF
 			il.EmitCall(OpCodes.Call, write, null);
 		}
 
-		private static void EmitInput(ILGenerator il, MethodInfo strLen, MethodInfo strChars, MethodInfo substring)
+		private void EmitInput(ILGenerator il, MethodInfo strLen, MethodInfo strChars, MethodInfo substring)
 		{
 			il.Emit(OpCodes.Ldloc_2);
 			il.EmitCall(OpCodes.Callvirt, strLen, null);
